@@ -1,9 +1,6 @@
-using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading.Tasks;
-using System.Collections.Generic;
 
 namespace Server.Classes
 {
@@ -20,6 +17,7 @@ namespace Server.Classes
                         listener.Start();
                         Console.WriteLine($"Serveur en écoute sur {localIp}:5000...");
 
+                        // boucle permettant d'accepter plusieurs clients (on les ajoutes dans une liste)
                         while (true)
                         {
                                 TcpClient client = await listener.AcceptTcpClientAsync();
@@ -32,14 +30,18 @@ namespace Server.Classes
 
                 private async Task handleClient(TcpClient client, int clientId)
                 {
+                        // Récupère le flux réseau
                         using NetworkStream stream = client.GetStream();
-                        // Reçoit le nom du client
+                        // nom client
                         byte[] buffer = new byte[1024];
+                        // Lit le nom du client
                         int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                        // Convertit les données en chaîne de caractères
                         string clientName = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
                         Console.WriteLine($"{clientName} - {clientId} connecté");
 
+                        // Boucle de réception des messages
                         while (true)
                         {
                                 bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
