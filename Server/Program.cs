@@ -1,7 +1,7 @@
 ﻿using Server.Classes;
 
 
-TcpServer server = new TcpServer();
+TcpServer server = new();
 
 await server.StartServer();
 

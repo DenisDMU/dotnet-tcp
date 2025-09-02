@@ -1,2 +1,4 @@
-﻿// See https://aka.ms/new-console-template for more information
-Console.WriteLine("Hello Client!");
+﻿using Client.Classes;
+
+TcpClientApp client = new TcpClientApp();
+await client.ConnectToServer(" 127.0.0.1", 5000);
