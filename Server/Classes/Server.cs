@@ -24,6 +24,7 @@ namespace Server.Classes
                 }
 
                 private readonly Database _db = new Database();
+                private readonly List<TcpClient> _clients = new List<TcpClient>();
 
                 private async Task HandleClient(TcpClient client)
                 {
@@ -71,14 +72,23 @@ namespace Server.Classes
                                         break;
                                 }
                         }
-
+                        _clients.Add(client);
                         // Boucle de réception des messages
                         while (true)
                         {
                                 int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
                                 if (bytesRead == 0) break;
                                 string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-
+                                if (message == "getid")
+                                {
+                                        await SendResponse(stream, userId!);
+                                        continue;
+                                }
+                                if (message == "/help")
+                                {
+                                        await Help.SendHelp(stream);
+                                        continue;
+                                }
                                 if (message == "exit")
                                 {
                                         await _db.SetUserConnection(userId!, false);
@@ -89,8 +99,9 @@ namespace Server.Classes
                                 if (message == "list")
                                 {
                                         var users = await _db.GetConnectedUsers();
-                                        var userList = string.Join("\n", users.Select(u => $"- {u["username"]}"));
-                                        await SendResponse(stream, $"Utilisateurs connectés :\n{userList}");
+                                        var userList = users.Select(u => u["username"].AsString).ToList();
+                                        var json = System.Text.Json.JsonSerializer.Serialize(userList);
+                                        await SendResponse(stream, $"ONLINE_USERS|{json}");
                                         continue;
                                 }
 
@@ -101,8 +112,24 @@ namespace Server.Classes
                                 Console.Write("> ");
                                 Console.WriteLine(message);
                                 await _db.SaveMessage(userId, message);
+                                foreach (var otherClient in _clients)
+                                {
+                                        if (!otherClient.Connected || otherClient == client) continue;
+                                        try
+                                        {
+                                                var otherStream = otherClient.GetStream();
+                                                string broadcast = $"{userId}|{username}>{message}";
+                                                byte[] broadcastData = Encoding.UTF8.GetBytes(broadcast);
+                                                await otherStream.WriteAsync(broadcastData, 0, broadcastData.Length);
+                                        }
+                                        catch (Exception ex)
+                                        {
+                                                Colored($"Erreur diffusion à {otherClient.Client.RemoteEndPoint}: {ex.Message}\n", ConsoleColor.Red);
+                                        }
+                                }
                         }
                         await _db.SetUserConnection(userId!, false);
+                        _clients.Remove(client);
                         client.Close();
                 }
 

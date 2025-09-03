@@ -76,7 +76,18 @@ namespace Server.Classes
                 };
                         await messages.InsertOneAsync(doc);
                 }
-
+                public async Task SavePrivateMessage(string senderName, string recipientName, string message)
+                {
+                        var conversations = _users.Database.GetCollection<BsonDocument>("conversations");
+                        var doc = new BsonDocument
+                        {
+                                { "sender", senderName },
+                                { "recipient", recipientName },
+                                { "message", message },
+                                { "timestamp", DateTime.UtcNow }
+                        };
+                        await conversations.InsertOneAsync(doc);
+                }
                 public async Task SetUserConnection(string userId, bool isConnected)
                 {
                         var filter = Builders<BsonDocument>.Filter.Eq("_id", new ObjectId(userId));
