@@ -13,3 +13,12 @@
 /Users/denisdmu/Documents/dotnet-tcp/Server/obj/Debug/net9.0/Server.pdb
 /Users/denisdmu/Documents/dotnet-tcp/Server/obj/Debug/net9.0/Server.genruntimeconfig.cache
 /Users/denisdmu/Documents/dotnet-tcp/Server/obj/Debug/net9.0/ref/Server.dll
+/Users/denisdmu/Documents/dotnet-tcp/Server/bin/Debug/net9.0/DnsClient.dll
+/Users/denisdmu/Documents/dotnet-tcp/Server/bin/Debug/net9.0/Microsoft.Extensions.Logging.Abstractions.dll
+/Users/denisdmu/Documents/dotnet-tcp/Server/bin/Debug/net9.0/MongoDB.Bson.dll
+/Users/denisdmu/Documents/dotnet-tcp/Server/bin/Debug/net9.0/MongoDB.Driver.dll
+/Users/denisdmu/Documents/dotnet-tcp/Server/bin/Debug/net9.0/SharpCompress.dll
+/Users/denisdmu/Documents/dotnet-tcp/Server/bin/Debug/net9.0/Snappier.dll
+/Users/denisdmu/Documents/dotnet-tcp/Server/bin/Debug/net9.0/ZstdSharp.dll
+/Users/denisdmu/Documents/dotnet-tcp/Server/obj/Debug/net9.0/Server.csproj.AssemblyReference.cache
+/Users/denisdmu/Documents/dotnet-tcp/Server/obj/Debug/net9.0/Server.csproj.Up2Date
