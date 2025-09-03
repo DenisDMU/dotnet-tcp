@@ -93,6 +93,7 @@ namespace Client.Classes
                                         continue;
                                 }
 
+
                                 byte[] msgData = Encoding.UTF8.GetBytes(message);
                                 await stream.WriteAsync(msgData);
                         }
