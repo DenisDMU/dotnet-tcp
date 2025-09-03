@@ -1,23 +1,27 @@
-using System.Text.Json;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.Json;
 
 namespace Server.Classes
 {
         public static class Help
         {
-                public static async Task SendHelp(NetworkStream stream)
+                public static async Task SendHelp(TcpClient client)
                 {
-                        var commands = new[]
+                        var helpMessage = new
                         {
-                new { Command = "/help", Description = "display this help" },
-                new { Command = "exit", Description = "quit chat" },
-                new { Command = "list", Description = "list online users" },
-                new { Command = "/msg <pseudo> <message>", Description = "PM another user" }
-            };
-
-                        var helpJson = JsonSerializer.Serialize(commands);
-                        byte[] data = Encoding.UTF8.GetBytes($"HELP|{helpJson}\n");
+                                type = "help",
+                                commands = new[]
+                            {
+                    new { command = "--help", description = "Affiche cette aide" },
+                    new { command = "/msg <user> <message>", description = "Envoyer un message privé" },
+                    new { command = "list", description = "Lister les utilisateurs connectés" },
+                    new { command = "exit", description = "Quitter le chat" }
+                }
+                        };
+                        string json = JsonSerializer.Serialize(helpMessage) + "\n";
+                        var stream = client.GetStream();
+                        byte[] data = Encoding.UTF8.GetBytes(json);
                         await stream.WriteAsync(data, 0, data.Length);
                 }
         }

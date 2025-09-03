@@ -16,7 +16,7 @@ namespace Server.Classes
                         _users = db.GetCollection<BsonDocument>("users");
                 }
 
-                public async Task TestConnectionAsync()
+                public async Task ConnectDatabase()
                 {
                         Console.WriteLine("Tentative de connexion à MongoDB...");
                         try
@@ -79,15 +79,80 @@ namespace Server.Classes
                 public async Task SavePrivateMessage(string senderName, string recipientName, string message)
                 {
                         var conversations = _users.Database.GetCollection<BsonDocument>("conversations");
-                        var doc = new BsonDocument
+
+                        // Récupère les documents complets des deux utilisateurs
+                        var senderDoc = await _users.Find(new BsonDocument("username", senderName)).FirstOrDefaultAsync();
+                        var recipientDoc = await _users.Find(new BsonDocument("username", recipientName)).FirstOrDefaultAsync();
+
+                        // Crée un filtre pour trouver une conversation existante entre les deux utilisateurs (par id)
+                        var filter = Builders<BsonDocument>.Filter.Or(
+                            Builders<BsonDocument>.Filter.And(
+                                Builders<BsonDocument>.Filter.Eq("participants.0._id", senderDoc["_id"]),
+                                Builders<BsonDocument>.Filter.Eq("participants.1._id", recipientDoc["_id"])
+                            ),
+                            Builders<BsonDocument>.Filter.And(
+                                Builders<BsonDocument>.Filter.Eq("participants.0._id", recipientDoc["_id"]),
+                                Builders<BsonDocument>.Filter.Eq("participants.1._id", senderDoc["_id"])
+                            )
+                        );
+
+                        // Cherche une conversation existante
+                        var conversation = await conversations.Find(filter).FirstOrDefaultAsync();
+
+                        // Crée un nouveau document de message
+                        var messageDoc = new BsonDocument
                         {
                                 { "sender", senderName },
-                                { "recipient", recipientName },
-                                { "message", message },
+                                { "content", message },
                                 { "timestamp", DateTime.UtcNow }
                         };
-                        await conversations.InsertOneAsync(doc);
+
+                        if (conversation == null)
+                        {
+                                // Crée une nouvelle conversation avec les documents complets
+                                conversation = new BsonDocument
+                                {
+                                { "participants", new BsonArray { senderDoc, recipientDoc } },
+                                { "messages", new BsonArray { messageDoc } }
+                                };
+                                await conversations.InsertOneAsync(conversation);
+                        }
+                        else
+                        {
+                                // Ajoute le message à la conversation existante
+                                var update = Builders<BsonDocument>.Update.Push("messages", messageDoc);
+                                await conversations.UpdateOneAsync(filter, update);
+                        }
                 }
+                public async Task<List<BsonDocument>> GetPrivateMessages(string user1, string user2)
+                {
+                        var conversations = _users.Database.GetCollection<BsonDocument>("conversations");
+
+                        var filter = Builders<BsonDocument>.Filter.Or(
+                            Builders<BsonDocument>.Filter.And(
+                                Builders<BsonDocument>.Filter.Eq("participants.0", user1),
+                                Builders<BsonDocument>.Filter.Eq("participants.1", user2)
+                            ),
+                            Builders<BsonDocument>.Filter.And(
+                                Builders<BsonDocument>.Filter.Eq("participants.0", user2),
+                                Builders<BsonDocument>.Filter.Eq("participants.1", user1)
+                            )
+                        );
+
+                        var conversation = await conversations.Find(filter).FirstOrDefaultAsync();
+
+                        if (conversation != null && conversation.Contains("messages"))
+                        {
+                                // Convertit chaque BsonValue en BsonDocument
+                                return conversation["messages"].AsBsonArray
+                                    .Select(m => m.AsBsonDocument)
+                                    .ToList();
+                        }
+
+                        return new List<BsonDocument>();
+                }
+
+
                 public async Task SetUserConnection(string userId, bool isConnected)
                 {
                         var filter = Builders<BsonDocument>.Filter.Eq("_id", new ObjectId(userId));
