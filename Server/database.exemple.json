@@ -1,0 +1,4 @@
+{
+	"ConnectionString": "mongodb+srv://<username>:<password>@cluster0.22a4itn.mongodb.net/",
+	"DatabaseName": "<database-name>"
+}

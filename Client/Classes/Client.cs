@@ -18,60 +18,96 @@ namespace Client.Classes
                                 Colored($"Connecté au serveur {serverIp}:{port}\n", ConsoleColor.Green);
                                 using NetworkStream stream = client.GetStream();
 
-                                string? name = null;
-
-                                while (true)
+                                string? name = await AuthenticateUser(stream);
+                                if (name != null)
                                 {
-                                        // Demande le nom et l'envoie au serveur
-                                        do
-                                        {
-                                                Colored("Username : ", ConsoleColor.Blue);
-                                                name = Console.ReadLine();
-                                                if (string.IsNullOrWhiteSpace(name))
-                                                        Console.WriteLine("Le pseudo ne peut pas être vide !");
-                                        } while (string.IsNullOrWhiteSpace(name));
-
-                                        byte[] nameData = Encoding.UTF8.GetBytes(name);
-                                        await stream.WriteAsync(nameData, 0, nameData.Length);
-
-                                        // Demande le mot de passe et l'envoie au serveur
-                                        Colored("Password :", ConsoleColor.Blue);
-                                        string? password = Console.ReadLine();
-                                        if (string.IsNullOrEmpty(password)) password = "password";
-                                        byte[] passData = Encoding.UTF8.GetBytes(password);
-                                        await stream.WriteAsync(passData, 0, passData.Length);
-
-                                        // Attend la réponse du serveur
-                                        byte[] buffer = new byte[1024];
-                                        int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
-                                        string response = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                                        _lastName = name;
-                                        if (response == "OK")
-                                        {
-                                                // Demande l'id au serveur (ajoute une commande spéciale)
-                                                byte[] askId = Encoding.UTF8.GetBytes("getid");
-                                                await stream.WriteAsync(askId, 0, askId.Length);
-                                                byte[] idBuffer = new byte[128];
-                                                int idBytes = await stream.ReadAsync(idBuffer, 0, idBuffer.Length);
-                                                myUserId = Encoding.UTF8.GetString(idBuffer, 0, idBytes).Trim();
-                                                _lastName = name;
-                                                Colored("Bievenue sur le chat. Pour la liste des commandes --help, pour quitter 'exit'.\n", ConsoleColor.Green);
-                                                break;
-                                        }
-                                        else if (response == "FAIL")
-                                        {
-                                                Colored("Échec de connexion ou pseudo déjà pris. Réessayez !\n", ConsoleColor.Red);
-                                        }
+                                        _ = ReceiveMessages(stream);
+                                        await SendMessage(stream, name);
                                 }
-                                _ = ReceiveMessages(stream);
-                                await SendMessage(stream, name);
-
                         }
                         catch (Exception ex)
                         {
                                 Console.WriteLine($"Erreur de connexion : {ex.Message}");
                         }
                 }
+
+                private async Task<string?> AuthenticateUser(NetworkStream stream)
+                {
+                        string? name = null;
+
+                        while (true)
+                        {
+                                name = GetUsername();
+                                await AuthentificationMethod(stream, name);
+
+                                string response = await GetServerResponse(stream);
+                                _lastName = name;
+
+                                if (response == "OK")
+                                {
+                                        await RequestAndSetUserId(stream);
+                                        DisplayWelcomeMessage();
+                                        return name;
+                                }
+                                else if (response == "FAIL")
+                                {
+                                        Colored("Échec de connexion ou pseudo déjà pris. Réessayez !\n", ConsoleColor.Red);
+                                }
+                        }
+                }
+
+                private string GetUsername()
+                {
+                        string? name;
+                        do
+                        {
+                                Colored("Username : ", ConsoleColor.Blue);
+                                name = Console.ReadLine();
+                                if (string.IsNullOrWhiteSpace(name))
+                                        Console.WriteLine("Le pseudo ne peut pas être vide !");
+                        } while (string.IsNullOrWhiteSpace(name));
+
+                        return name;
+                }
+
+                private async Task AuthentificationMethod(NetworkStream stream, string name)
+                {
+                        // Envoi du nom d'utilisateur
+                        byte[] nameData = Encoding.UTF8.GetBytes(name);
+                        await stream.WriteAsync(nameData, 0, nameData.Length);
+
+                        // Demande et envoi du mot de passe
+                        Colored("Password :", ConsoleColor.Blue);
+                        string? password = Console.ReadLine();
+                        if (string.IsNullOrEmpty(password)) password = "password";
+                        byte[] passData = Encoding.UTF8.GetBytes(password);
+                        await stream.WriteAsync(passData, 0, passData.Length);
+                }
+
+                private async Task<string> GetServerResponse(NetworkStream stream)
+                {
+                        byte[] buffer = new byte[1024];
+                        int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                        return Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                }
+
+                private async Task RequestAndSetUserId(NetworkStream stream)
+                {
+                        // Demande l'id au serveur
+                        byte[] askId = Encoding.UTF8.GetBytes("getid");
+                        await stream.WriteAsync(askId, 0, askId.Length);
+
+                        // Réception de l'ID
+                        byte[] idBuffer = new byte[128];
+                        int idBytes = await stream.ReadAsync(idBuffer, 0, idBuffer.Length);
+                        myUserId = Encoding.UTF8.GetString(idBuffer, 0, idBytes).Trim();
+                }
+
+                private void DisplayWelcomeMessage()
+                {
+                        Colored("Bienvenue sur le chat. Pour la liste des commandes --help, pour quitter 'exit'.\n", ConsoleColor.Green);
+                }
+
                 private async Task SendMessage(NetworkStream stream, string name)
                 {
                         while (true)
@@ -93,12 +129,10 @@ namespace Client.Classes
                                         continue;
                                 }
 
-
                                 byte[] msgData = Encoding.UTF8.GetBytes(message);
                                 await stream.WriteAsync(msgData);
                         }
                 }
-
 
                 private async Task ReceiveMessages(NetworkStream stream)
                 {
@@ -117,75 +151,12 @@ namespace Client.Classes
 
                                                 if (root.TryGetProperty("type", out var type))
                                                 {
-                                                        switch (type.GetString())
-                                                        {
-                                                                case "public_message":
-                                                                        if (root.GetProperty("sender").GetString() != _lastName)
-                                                                        {
-                                                                                Console.Write("\r" + new string(' ', Console.WindowWidth) + "\r");
-                                                                                Colored($"{root.GetProperty("sender").GetString()} > ", ConsoleColor.Blue);
-                                                                                Console.WriteLine(root.GetProperty("content").GetString());
-                                                                        }
-                                                                        break;
-
-                                                                case "private_message":
-                                                                        Console.Write("\r" + new string(' ', Console.WindowWidth) + "\r");
-                                                                        Colored($"[de {root.GetProperty("sender").GetString()}] > ", ConsoleColor.Magenta);
-                                                                        Colored(root.GetProperty("content").GetString() + "\n", ConsoleColor.Magenta);
-                                                                        break;
-
-                                                                case "private_confirmation":
-                                                                        Console.Write("\r" + new string(' ', Console.WindowWidth) + "\r");
-                                                                        Colored($"[ à {root.GetProperty("recipient").GetString()}] {root.GetProperty("content").GetString()}\n", ConsoleColor.Magenta);
-                                                                        break;
-
-                                                                case "user_list":
-                                                                        Console.Write("\r" + new string(' ', Console.WindowWidth) + "\r");
-                                                                        Colored("\n--------- Online ---------------\n", ConsoleColor.Cyan);
-                                                                        foreach (var user in root.GetProperty("users").EnumerateArray())
-                                                                                Console.WriteLine($"- {user.GetString()}");
-                                                                        Colored("-----------------------------\n", ConsoleColor.Cyan);
-                                                                        break;
-                                                                case "error":
-                                                                        Console.Write("\r" + new string(' ', Console.WindowWidth) + "\r");
-                                                                        Colored($"[ERREUR] {root.GetProperty("message").GetString()}\n", ConsoleColor.Red);
-                                                                        break;
-                                                                case "help":
-                                                                        Console.Write("\r" + new string(' ', Console.WindowWidth) + "\r");
-                                                                        var commands = new List<Dictionary<string, string>>();
-                                                                        foreach (var cmd in root.GetProperty("commands").EnumerateArray())
-                                                                        {
-                                                                                commands.Add(new Dictionary<string, string>
-                                                                                {
-                                                                                { "Command", cmd.GetProperty("command").GetString() ?? "" },
-                                                                                { "Description", cmd.GetProperty("description").GetString() ?? "" }
-                                                                                });
-                                                                        }
-
-                                                                        Colored("╔══════════════════════════════════════════════════════════════════╗\n", ConsoleColor.Magenta);
-                                                                        Colored("║                Commandes disponibles                             ║\n", ConsoleColor.Magenta);
-                                                                        Colored("╠══════════════════════════════════════════════════════════════════╣\n", ConsoleColor.Magenta);
-                                                                        foreach (var cmd in commands)
-                                                                        {
-                                                                                Colored($"║ {cmd["Command"],-25} | {cmd["Description"],-30}         ║\n", ConsoleColor.Magenta);
-                                                                        }
-                                                                        Colored("╚══════════════════════════════════════════════════════════════════╝\n", ConsoleColor.Magenta);
-                                                                        break;
-                                                        }
+                                                        HandleMessageByType(root, type.GetString());
                                                 }
                                         }
                                         catch (JsonException)
                                         {
-                                                if (msg.StartsWith("ONLINE_USERS|"))
-                                                {
-                                                        var json = msg.Substring("ONLINE_USERS|".Length);
-                                                        var userList = JsonSerializer.Deserialize<List<string>>(json);
-                                                        Console.Write("\r" + new string(' ', Console.WindowWidth) + "\r");
-                                                        Colored("\n--------- Online ---------------\n", ConsoleColor.Cyan);
-                                                        foreach (var user in userList!)
-                                                                Console.WriteLine($"- {user}");
-                                                        Colored("-----------------------------\n", ConsoleColor.Cyan);
-                                                }
+
                                         }
 
                                         Console.Write($"{Colored(_lastName, ConsoleColor.Blue)} > ");
@@ -193,6 +164,119 @@ namespace Client.Classes
                         }
                 }
 
+
+
+                private void HandleMessageByType(JsonElement root, string? messageType)
+                {
+                        switch (messageType)
+                        {
+                                case "public_message":
+                                        HandlePublicMessage(root);
+                                        break;
+                                case "private_message":
+                                        HandlePrivateMessage(root);
+                                        break;
+                                case "private_confirmation":
+                                        HandlePrivateConfirmation(root);
+                                        break;
+                                case "user_list":
+                                        HandleUserList(root);
+                                        break;
+                                case "error":
+                                        HandleError(root);
+                                        break;
+                                case "help":
+                                        HandleHelp(root);
+                                        break;
+                        }
+                }
+
+                private void HandlePublicMessage(JsonElement root)
+                {
+                        if (root.GetProperty("sender").GetString() != _lastName)
+                        {
+                                ClearCurrentLine();
+                                Colored($"{root.GetProperty("sender").GetString()} > ", ConsoleColor.Blue);
+                                Console.WriteLine(root.GetProperty("content").GetString());
+                        }
+                }
+
+                private void HandlePrivateMessage(JsonElement root)
+                {
+                        ClearCurrentLine();
+                        Colored($"[de {root.GetProperty("sender").GetString()}] > ", ConsoleColor.Magenta);
+                        Colored(root.GetProperty("content").GetString() + "\n", ConsoleColor.Magenta);
+                }
+
+                private void HandlePrivateConfirmation(JsonElement root)
+                {
+                        ClearCurrentLine();
+                        Colored($"[ à {root.GetProperty("recipient").GetString()}] {root.GetProperty("content").GetString()}\n", ConsoleColor.Magenta);
+                }
+
+                private void HandleUserList(JsonElement root)
+                {
+                        ClearCurrentLine();
+                        Colored("\n--------- Online ---------------\n", ConsoleColor.Cyan);
+                        foreach (var user in root.GetProperty("users").EnumerateArray())
+                                Console.WriteLine($"- {user.GetString()}");
+                        Colored("-----------------------------\n", ConsoleColor.Cyan);
+                }
+
+                private void HandleError(JsonElement root)
+                {
+                        ClearCurrentLine();
+                        Colored($"[ERREUR] {root.GetProperty("message").GetString()}\n", ConsoleColor.Red);
+                }
+
+                private void HandleHelp(JsonElement root)
+                {
+                        ClearCurrentLine();
+                        var commands = ExtractCommands(root);
+                        DisplayCommandsTable(commands);
+                }
+
+                private List<Dictionary<string, string>> ExtractCommands(JsonElement root)
+                {
+                        var commands = new List<Dictionary<string, string>>();
+                        foreach (var cmd in root.GetProperty("commands").EnumerateArray())
+                        {
+                                commands.Add(new Dictionary<string, string>
+                                {
+                                        { "Command", cmd.GetProperty("command").GetString() ?? "" },
+                                        { "Description", cmd.GetProperty("description").GetString() ?? "" }
+                                });
+                        }
+                        return commands;
+                }
+
+                private void DisplayCommandsTable(List<Dictionary<string, string>> commands)
+                {
+                        Colored("╔══════════════════════════════════════════════════════════════════╗\n", ConsoleColor.Magenta);
+                        Colored("║                Commandes disponibles                             ║\n", ConsoleColor.Magenta);
+                        Colored("╠══════════════════════════════════════════════════════════════════╣\n", ConsoleColor.Magenta);
+                        foreach (var cmd in commands)
+                        {
+                                Colored($"║ {cmd["Command"],-25} | {cmd["Description"],-30}         ║\n", ConsoleColor.Magenta);
+                        }
+                        Colored("╚══════════════════════════════════════════════════════════════════╝\n", ConsoleColor.Magenta);
+                }
+
+                private void DisplayOnlineUsers(string msg)
+                {
+                        var json = msg.Substring("ONLINE_USERS|".Length);
+                        var userList = JsonSerializer.Deserialize<List<string>>(json);
+                        ClearCurrentLine();
+                        Colored("\n--------- Online ---------------\n", ConsoleColor.Cyan);
+                        foreach (var user in userList!)
+                                Console.WriteLine($"- {user}");
+                        Colored("-----------------------------\n", ConsoleColor.Cyan);
+                }
+
+                private void ClearCurrentLine()
+                {
+                        Console.Write("\r" + new string(' ', Console.WindowWidth) + "\r");
+                }
 
                 private string Colored(string text, ConsoleColor color)
                 {
