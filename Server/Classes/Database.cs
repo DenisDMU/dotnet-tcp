@@ -1,5 +1,6 @@
 using MongoDB.Driver;
 using MongoDB.Bson;
+using System.Text.Json;
 
 
 namespace Server.Classes
@@ -10,15 +11,34 @@ namespace Server.Classes
 
                 public Database()
                 {
-                        const string connectionUri = "mongodb://localhost:27017";
-                        var client = new MongoClient(connectionUri);
-                        var db = client.GetDatabase("tcp-chat");
-                        _users = db.GetCollection<BsonDocument>("users");
-                }
+                        string configPath = "database.json";
 
+                        try
+                        {
+                                if (!File.Exists(configPath))
+                                {
+                                        Colored($"Erreur : Fichier {configPath} introuvable.\n", ConsoleColor.Red);
+                                        throw new FileNotFoundException($"Le fichier de configuration {configPath} est requis");
+                                }
+
+                                var configText = File.ReadAllText(configPath);
+                                var config = JsonSerializer.Deserialize<JsonElement>(configText);
+                                string connectionUri = config.GetProperty("ConnectionString").GetString()!;
+                                string dbName = config.GetProperty("DatabaseName").GetString()!;
+
+                                var client = new MongoClient(connectionUri);
+                                var db = client.GetDatabase(dbName);
+                                _users = db.GetCollection<BsonDocument>("users");
+                        }
+                        catch (Exception ex)
+                        {
+                                Colored($"Erreur lors du chargement de la configuration : {ex.Message}\n", ConsoleColor.Red);
+                                throw;
+                        }
+                }
                 public async Task ConnectDatabase()
                 {
-                        Console.WriteLine("Tentative de connexion à MongoDB...");
+                        Colored("Connexion à MongoDB...\n", ConsoleColor.Yellow);
                         try
                         {
                                 var result = await _users.Database.RunCommandAsync<BsonDocument>(new BsonDocument("ping", 1));
@@ -39,7 +59,8 @@ namespace Server.Classes
                         var doc = new BsonDocument
                         {
                                 { "username", username },
-                                { "password", password }
+                                { "password", password },
+                                {"isConnected",true}
                         };
                         await _users.InsertOneAsync(doc);
                         return true;

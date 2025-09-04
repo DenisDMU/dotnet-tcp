@@ -11,4 +11,10 @@
     <PackageReference Include="MongoDB.Driver" Version="3.4.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="database.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

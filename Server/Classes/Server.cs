@@ -15,13 +15,20 @@ namespace Server.Classes
 
                 public async Task StartServer()
                 {
-                        IPAddress localIp = Dns.GetHostEntry(Dns.GetHostName())
-                                               .AddressList.First(ip => ip.AddressFamily == AddressFamily.InterNetwork);
-                        TcpListener listener = new TcpListener(localIp, 5000);
+                        IPAddress serverIp = IPAddress.Any;
+                        TcpListener listener = new TcpListener(serverIp, 5000);
                         listener.Start();
                         _broadcast = new Broadcast(_db, _clients, _usernameToClient);
-                        Colored($"Serveur en écoute sur {localIp}:5000...\n", ConsoleColor.Blue);
-
+                        var host = Dns.GetHostEntry(Dns.GetHostName());
+                        Colored("Serveur en écoute sur les adresses suivantes :\n", ConsoleColor.Blue);
+                        //liste les ip pour se connecter au chat (local ou public)
+                        foreach (var ip in host.AddressList)
+                        {
+                                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                                {
+                                        Colored($"- {ip}:{((IPEndPoint)listener.LocalEndpoint).Port}\n", ConsoleColor.Blue);
+                                }
+                        }
                         while (true)
                         {
                                 TcpClient client = await listener.AcceptTcpClientAsync();
