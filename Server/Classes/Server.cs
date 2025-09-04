@@ -42,6 +42,7 @@ namespace Server.Classes
                         byte[] buffer = new byte[1024];
                         string? username = null;
                         string? userId = null;
+                        bool waitingForIdRequest = true; // Flag pour autoriser getid uniquement après login
 
                         // Authentification
                         while (true)
@@ -91,9 +92,15 @@ namespace Server.Classes
 
                                 string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
-                                if (message == "getid")
+                                if (message == "getid" && waitingForIdRequest)
                                 {
                                         await SendResponse(stream, userId!);
+                                        waitingForIdRequest = false;
+                                        continue;
+                                }
+                                else if (message == "getid")
+                                {
+
                                         continue;
                                 }
                                 if (message == "--help")
