@@ -117,14 +117,5 @@ The application provides a simple authentication system:
 - **Connection Management:** Graceful handling of client disconnections.
 - **Prompt Preservation:** Client UI maintains user input when receiving messages.
 
-## Future Improvements
-
-- Implement end-to-end encryption for private messages.
-- Add message history retrieval.
-- Support file sharing.
-- Improve authentication with password hashing and salting.
-- Add user profile management.
-- Implement user typing indicators.
-- Add support for message editing and deletion.
 
 ---
