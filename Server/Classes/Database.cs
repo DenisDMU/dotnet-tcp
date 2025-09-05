@@ -65,6 +65,7 @@ namespace Server.Classes
                         await _users.InsertOneAsync(doc);
                         return true;
                 }
+
                 public async Task<string?> GetUserId(string username)
                 {
                         var user = await _users.Find(new BsonDocument("username", username)).FirstOrDefaultAsync();
@@ -91,7 +92,7 @@ namespace Server.Classes
 
                         var doc = new BsonDocument
                 {
-                        { "user", userDoc ?? new BsonDocument() }, // Ajoute tout le doc utilisateur
+                        { "user", userDoc ?? new BsonDocument() }, // Ajoute tout le doc utilisateur parce qu'on n'est pas en relationel classique avec mongo
                         { "message", message },
                         { "timestamp", DateTime.UtcNow }
                 };

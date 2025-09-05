@@ -1,8 +1,9 @@
+using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Server.Classes
 {
@@ -19,9 +20,22 @@ namespace Server.Classes
                         TcpListener listener = new TcpListener(serverIp, 5000);
                         listener.Start();
                         _broadcast = new Broadcast(_db, _clients, _usernameToClient);
+
+                        // Affiche les adresses IP disponibles pour la connexion
+                        DisplayServerAddresses(listener);
+
+                        // Boucle pour accepter clients
+                        while (true)
+                        {
+                                TcpClient client = await listener.AcceptTcpClientAsync();
+                                _ = ManageClient(client); // On peut gérer chaque client en parallèle
+                        }
+                }
+
+                private void DisplayServerAddresses(TcpListener listener)
+                {
                         var host = Dns.GetHostEntry(Dns.GetHostName());
                         Colored("Serveur en écoute sur les adresses suivantes :\n", ConsoleColor.Blue);
-                        //liste les ip pour se connecter au chat (local ou public)
                         foreach (var ip in host.AddressList)
                         {
                                 if (ip.AddressFamily == AddressFamily.InterNetwork)
@@ -29,62 +43,82 @@ namespace Server.Classes
                                         Colored($"- {ip}:{((IPEndPoint)listener.LocalEndpoint).Port}\n", ConsoleColor.Blue);
                                 }
                         }
-                        while (true)
-                        {
-                                TcpClient client = await listener.AcceptTcpClientAsync();
-                                _ = ManageClient(client);
-                        }
                 }
 
                 private async Task ManageClient(TcpClient client)
                 {
-                        using NetworkStream stream = client.GetStream();
-                        byte[] buffer = new byte[1024];
-                        string? username = null;
-                        string? userId = null;
-                        bool waitingForIdRequest = true; // Flag pour autoriser getid uniquement après login
-
-                        // Authentification
-                        while (true)
+                        using (client)
+                        using (NetworkStream stream = client.GetStream())
                         {
-                                int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
-                                username = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                                bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
-                                string password = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                                // Authentification du client
+                                var authResult = await AuthenticateClient(stream);
+                                if (!authResult.success)
+                                        return;
 
-                                bool connected = await _db.ConnectUser(username, password);
-                                if (!connected)
-                                {
-                                        bool created = await _db.AddUser(username, password);
-                                        if (created)
-                                        {
-                                                userId = await _db.GetUserId(username);
-                                                Colored($"New User : {username} - {userId}\n", ConsoleColor.Green);
-                                                await SendResponse(stream, "OK");
-                                                break;
-                                        }
-                                        else
-                                        {
-                                                Colored($"Failed Connection for {username} -> Wrong Password or Username already taken.\n", ConsoleColor.Red);
-                                                await SendResponse(stream, "FAIL");
-                                                continue;
-                                        }
-                                }
-                                else
-                                {
-                                        userId = await _db.GetUserId(username);
-                                        Colored($"User Connected : {username} (ID {userId})\n", ConsoleColor.Green);
-                                        await _db.SetUserConnection(userId!, true);
-                                        await SendResponse(stream, "OK");
-                                        break;
-                                }
+                                string username = authResult.username!;
+                                string userId = authResult.userId!;
+
+                                //  Ajout du client aux collections
+                                AddClientToCollections(client, username);
+
+                                //  Boucle de gestion des messages
+                                await HandleClientMessages(stream, username, userId, client);
+
+                                // Nettoyage à la déconnexion
+                                await CleanupClientDisconnection(userId, username);
                         }
+                }
 
-                        // Ajoute le client au dictionnaire
+                private async Task<(bool success, string? username, string? userId)> AuthenticateClient(NetworkStream stream)
+                {
+                        byte[] buffer = new byte[1024];
+
+                        // on récup le  username
+                        int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                        string username = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+
+                        // on récup le  mot de passe
+                        bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                        string password = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+
+                        // Tentative de connexion
+                        bool connected = await _db.ConnectUser(username, password);
+                        if (!connected)
+                        {
+                                // Tentative de création de compte si la connexion échoue
+                                bool created = await _db.AddUser(username, password);
+                                if (!created)
+                                {
+                                        Colored($"Échec de la connexion pour {username} -> Mot de passe incorrect ou nom d'utilisateur déjà pris.\n", ConsoleColor.Red);
+                                        await SendResponse(stream, "FAIL");
+                                        return (false, null, null);
+                                }
+                                string? userId = await _db.GetUserId(username);
+                                Colored($"Nouvel utilisateur : {username} - {userId}\n", ConsoleColor.Green);
+                                await SendResponse(stream, "OK");
+                                return (true, username, userId);
+                        }
+                        else
+                        {
+                                string? userId = await _db.GetUserId(username);
+                                Colored($"Utilisateur connecté : {username} (ID {userId})\n", ConsoleColor.Green);
+                                await _db.SetUserConnection(userId!, true);
+                                await SendResponse(stream, "OK");
+                                return (true, username, userId);
+                        }
+                }
+
+                private void AddClientToCollections(TcpClient client, string username)
+                {
                         _clients.Add(client);
-                        _usernameToClient[username!] = client;
+                        _usernameToClient[username] = client;
+                }
 
-                        // Boucle de réception des messages
+                private async Task HandleClientMessages(NetworkStream stream, string username, string userId, TcpClient client)
+                {
+                        byte[] buffer = new byte[1024];
+                        bool waitingForIdRequest = true;
+
                         while (true)
                         {
                                 int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
@@ -92,86 +126,97 @@ namespace Server.Classes
 
                                 string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
+                                // Gestion du getid qu'on ne veut pas mettre a disposition des users
                                 if (message == "getid" && waitingForIdRequest)
                                 {
-                                        await SendResponse(stream, userId!);
+                                        await SendResponse(stream, userId);
                                         waitingForIdRequest = false;
                                         continue;
                                 }
                                 else if (message == "getid")
                                 {
-
-                                        continue;
-                                }
-                                if (message == "--help")
-                                {
-                                        await Help.SendHelp(client);
-                                        continue;
-                                }
-                                if (message == "exit")
-                                {
-                                        await _db.SetUserConnection(userId!, false);
-                                        Colored($"{username} s'est déconnecté.\n", ConsoleColor.Yellow);
-                                        break;
-                                }
-                                if (message == "list")
-                                {
-                                        await _broadcast!.BroadcastUserList(client);
-                                        continue;
-                                }
-                                if (message.StartsWith("/msg "))
-                                {
-                                        var parts = message.Split(' ', 3);
-                                        if (parts.Length == 3)
-                                        {
-                                                string recipient = parts[1];
-                                                string privateMessage = parts[2];
-
-                                                if (_usernameToClient.ContainsKey(recipient))
-                                                {
-                                                        await _broadcast!.BroadcastPrivate(userId!, username!, recipient, privateMessage);
-
-                                                        // Confirme l'envoi
-                                                        var confirmation = new
-                                                        {
-                                                                type = "private_confirmation",
-                                                                recipient = recipient,
-                                                                content = privateMessage
-                                                        };
-                                                        string confirmJson = JsonSerializer.Serialize(confirmation) + "\n";
-                                                        await stream.WriteAsync(Encoding.UTF8.GetBytes(confirmJson), 0, confirmJson.Length);
-                                                }
-                                                else
-                                                {
-                                                        // Informe que le destinataire n'est pas connecté
-                                                        var errorMsg = new
-                                                        {
-                                                                type = "error",
-                                                                message = $"Utilisateur {recipient} non connecté"
-                                                        };
-                                                        string errorJson = JsonSerializer.Serialize(errorMsg) + "\n";
-                                                        await stream.WriteAsync(Encoding.UTF8.GetBytes(errorJson), 0, errorJson.Length);
-                                                }
-                                        }
                                         continue;
                                 }
 
-                                // Message public
-                                Colored($"[{DateTime.Now:HH:mm:ss}] ", ConsoleColor.DarkGray);
-                                Colored($"{username} ", ConsoleColor.Blue);
-                                Colored($"({userId}) ", ConsoleColor.DarkGray);
-                                Console.Write("> ");
-                                Console.WriteLine(message);
+                                if (await HandleSpecialCommands(stream, message, username, userId, client))
+                                        continue;
 
-                                await _db.SaveMessage(userId, message);
-                                await _broadcast!.BroadcastPublic(userId!, username!, message, client);
+                                // par défaut, message public
+                                await HandlePublicMessage(stream, message, username, userId);
                         }
+                }
 
-                        // Nettoyage à la déconnexion
-                        await _db.SetUserConnection(userId!, false);
-                        _clients.Remove(client);
-                        _usernameToClient.Remove(username!);
-                        client.Close();
+                private async Task<bool> HandleSpecialCommands(NetworkStream stream, string message, string username, string userId, TcpClient client)
+                {
+                        if (message == "--help")
+                        {
+                                await Help.SendHelp(client);
+                                return true;
+                        }
+                        if (message == "exit")
+                        {
+                                await _db.SetUserConnection(userId, false);
+                                Colored($"{username} s'est déconnecté.\n", ConsoleColor.Yellow);
+                                return true;
+                        }
+                        if (message == "list")
+                        {
+                                await _broadcast!.BroadcastUserList(client);
+                                return true;
+                        }
+                        if (message.StartsWith("/msg "))
+                        {
+                                await HandlePrivateMessage(stream, message, userId, username);
+                                return true;
+                        }
+                        return false;
+                }
+
+                private async Task HandlePrivateMessage(NetworkStream stream, string message, string userId, string username)
+                {
+                        var parts = message.Split(' ', 3);
+                        if (parts.Length == 3)
+                        {
+                                string recipient = parts[1];
+                                string privateMessage = parts[2];
+                                if (_usernameToClient.TryGetValue(recipient, out _))
+                                {
+                                        await _broadcast!.BroadcastPrivate(userId, username, recipient, privateMessage);
+                                        // Confirme l'envoi
+                                        var confirmation = new { type = "private_confirmation", recipient, content = privateMessage };
+                                        string confirmJson = JsonSerializer.Serialize(confirmation) + "\n";
+                                        await stream.WriteAsync(Encoding.UTF8.GetBytes(confirmJson), 0, confirmJson.Length);
+                                }
+                                else
+                                {
+                                        // Message si le destinataire n'est pas connecté
+                                        var errorMsg = new { type = "error", message = $"Utilisateur {recipient} non connecté" };
+                                        string errorJson = JsonSerializer.Serialize(errorMsg) + "\n";
+                                        await stream.WriteAsync(Encoding.UTF8.GetBytes(errorJson), 0, errorJson.Length);
+                                }
+                        }
+                }
+
+                // Affichage des messages publics dans le server pour monitorer tout ça 
+                private async Task HandlePublicMessage(NetworkStream stream, string message, string username, string userId)
+                {
+                        Colored($"[{DateTime.Now:HH:mm:ss}] ", ConsoleColor.DarkGray);
+                        Colored($"{username} ", ConsoleColor.Blue);
+                        Colored($"({userId}) ", ConsoleColor.DarkGray);
+                        Console.Write("> ");
+                        Console.WriteLine(message);
+                        await _db.SaveMessage(userId, message);
+                        await _broadcast!.BroadcastPublic(userId, username, message, _usernameToClient[username]);
+                }
+
+                private async Task CleanupClientDisconnection(string userId, string username)
+                {
+                        await _db.SetUserConnection(userId, false);
+                        if (_usernameToClient.TryGetValue(username, out var client))
+                        {
+                                _clients.Remove(client);
+                                _usernameToClient.Remove(username);
+                        }
                 }
 
                 private async Task SendResponse(NetworkStream stream, string response)
