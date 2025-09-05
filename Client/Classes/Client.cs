@@ -9,8 +9,12 @@ namespace Client.Classes
                 private string _lastName = "";
                 string? myUserId = null;
 
-                /// Établit une connexion TCP avec le serveur spécifié.
-                /// Gère l'authentification de l'utilisateur, puis lance les tâches d'envoi et de réception des messages en parallèle.     
+                // lock pour protéger la console
+                private readonly object _consoleLock = new object();
+
+                // buffer pour le texte en cours de saisie
+                private readonly StringBuilder _currentInput = new StringBuilder();
+
                 public async Task ConnectToServer(string serverIp, int port)
                 {
                         try
@@ -19,13 +23,13 @@ namespace Client.Classes
                                 await client.ConnectAsync(serverIp, port);
                                 Colored($"Connecté au serveur {serverIp}:{port}\n", ConsoleColor.Green);
                                 using NetworkStream stream = client.GetStream();
-
-                                string? name = await AuthenticateUser(stream);
-                                if (name != null)
+                                string? name = null;
+                                while (name == null)
                                 {
-                                        _ = ReceiveMessages(stream);
-                                        await SendMessage(stream, name);
+                                        name = await AuthenticateUser(stream);
                                 }
+                                _ = ReceiveMessages(stream);
+                                await SendMessage(stream, name);
                         }
                         catch (Exception ex)
                         {
@@ -33,20 +37,15 @@ namespace Client.Classes
                         }
                 }
 
-                /// Boucle d'authentification qui demande un nom d'utilisateur et un mot de passe jusqu'à ce que le serveur valide la connexion.
-                /// Retourne le nom d'utilisateur validé ou null en cas d'échec.
                 private async Task<string?> AuthenticateUser(NetworkStream stream)
                 {
                         string? name = null;
-
                         while (true)
                         {
                                 name = GetUsername();
                                 await AuthentificationMethod(stream, name);
-
                                 string response = await GetServerResponse(stream);
                                 _lastName = name;
-
                                 if (response == "OK")
                                 {
                                         await RequestAndSetUserId(stream);
@@ -60,7 +59,6 @@ namespace Client.Classes
                         }
                 }
 
-                /// Demande à l'utilisateur de saisir un nom d'utilisateur, pour éviter les entrées vides
                 private string GetUsername()
                 {
                         string? name;
@@ -71,18 +69,14 @@ namespace Client.Classes
                                 if (string.IsNullOrWhiteSpace(name))
                                         Console.WriteLine("Le pseudo ne peut pas être vide !");
                         } while (string.IsNullOrWhiteSpace(name));
-
                         return name;
                 }
 
-                /// Envoie le nom d'utilisateur et le mot de passe au serveur pour authentification.
                 private async Task AuthentificationMethod(NetworkStream stream, string name)
                 {
-                        // Envoi du nom d'utilisateur
                         byte[] nameData = Encoding.UTF8.GetBytes(name);
                         await stream.WriteAsync(nameData, 0, nameData.Length);
 
-                        // Demande et envoi du mot de passe
                         Colored("Password :", ConsoleColor.Blue);
                         string? password = Console.ReadLine();
                         if (string.IsNullOrEmpty(password)) password = "password";
@@ -90,7 +84,6 @@ namespace Client.Classes
                         await stream.WriteAsync(passData, 0, passData.Length);
                 }
 
-                /// On va lire la réponse du serveur (ok ou fail) après tentative de connexion
                 private async Task<string> GetServerResponse(NetworkStream stream)
                 {
                         byte[] buffer = new byte[1024];
@@ -98,59 +91,124 @@ namespace Client.Classes
                         return Encoding.UTF8.GetString(buffer, 0, bytesRead);
                 }
 
-                /// On récupère l'id de l'user auprès du serveur et on le stock dans myUserId
                 private async Task RequestAndSetUserId(NetworkStream stream)
                 {
-                        // Demande l'id au serveur
                         var request = new { type = "getid" };
                         string json = JsonSerializer.Serialize(request) + "\n";
                         byte[] askId = Encoding.UTF8.GetBytes(json);
                         await stream.WriteAsync(askId, 0, askId.Length);
 
-                        // Réception de l'ID
                         byte[] idBuffer = new byte[128];
                         int idBytes = await stream.ReadAsync(idBuffer, 0, idBuffer.Length);
                         myUserId = Encoding.UTF8.GetString(idBuffer, 0, idBytes).Trim();
                 }
 
-                /// Affichage message de bienvenue avec les commandes utiles
                 private void DisplayWelcomeMessage()
                 {
                         Colored("Bienvenue sur le chat. Pour la liste des commandes --help, pour quitter 'exit'.\n", ConsoleColor.Green);
                 }
 
-                /// Boucle d'envoi de messages qui lit les entrées utilisateur et les envoie au serveur.
-                /// On gère aussi list et exit aussi
+                // L'envoi de message ici, on utilise InputReading à la place de Console.ReadLine
                 private async Task SendMessage(NetworkStream stream, string name)
                 {
                         while (true)
                         {
-                                // On génère le timestamp actuel
-                                string timestamp = DateTime.Now.ToString("HH:mm:ss");
-                                // On affiche le prompt avec le timestamp
-                                Console.Write($"{Colored($"[{timestamp}] ", ConsoleColor.DarkGray)}{Colored(name, ConsoleColor.Blue)} > ");
-                                string? message = Console.ReadLine();
+                                string message = await InputReading(name);
+
                                 if (string.IsNullOrEmpty(message))
                                         continue;
+
                                 if (message == "exit")
                                 {
                                         byte[] data = Encoding.UTF8.GetBytes(message);
                                         await stream.WriteAsync(data);
                                         break;
                                 }
+
                                 if (message == "--list")
                                 {
                                         byte[] data = Encoding.UTF8.GetBytes(message);
                                         await stream.WriteAsync(data);
                                         continue;
                                 }
+
                                 byte[] msgData = Encoding.UTF8.GetBytes(message);
                                 await stream.WriteAsync(msgData);
                         }
                 }
 
-                /// Écoute en continu les messages envoyés par le serveur.
-                /// On parse les JSON reçus que l'on traite ensuite par "type" c'est à dire public_message, private_message, user_list, error, help
+                // lecture des inputs de l'utilisateur, avec gestion du prompt
+                private Task<string> InputReading(string name)
+                {
+                        return Task.Run(() =>
+                        {
+                                // On init le prompt
+                                InitializePrompt(name);
+
+                                // boucle pour lire les touches
+                                while (true)
+                                {
+                                        var key = Console.ReadKey(true); // on capture la touche
+
+                                        lock (_consoleLock)
+                                        {
+                                                // si c'est Enter, on retourne le texte saisi
+                                                if (key.Key == ConsoleKey.Enter)
+                                                {
+                                                        Console.WriteLine();
+                                                        Console.CursorVisible = false;
+                                                        string result = _currentInput.ToString();
+                                                        _currentInput.Clear();
+                                                        return result;
+                                                }
+
+                                                // on traite la touche
+                                                ProcessKeyInput(key);
+
+                                                // On affiche le prompt mis à jour
+                                                PromptBasic(name);
+                                        }
+                                }
+                        });
+                }
+
+                // Initialise le prompt et prépare la saisie
+                private void InitializePrompt(string name)
+                {
+                        lock (_consoleLock)
+                        {
+                                _currentInput.Clear();
+                                PromptBasic(name);
+                                Console.CursorVisible = true;
+                        }
+                }
+
+                // Traite une touche du clavier
+                private void ProcessKeyInput(ConsoleKeyInfo key)
+                {
+                        // touche effacer
+                        if (key.Key == ConsoleKey.Backspace)
+                        {
+                                if (_currentInput.Length > 0)
+                                        _currentInput.Remove(_currentInput.Length - 1, 1);
+                        }
+                        // caractère standard
+                        else if (!char.IsControl(key.KeyChar))
+                        {
+                                _currentInput.Append(key.KeyChar);
+                        }
+                }
+                // on  affiche notre prompt de base :)
+                private void PromptBasic(string name)
+                {
+                        ClearCurrentLine();
+                        string timestamp = DateTime.Now.ToString("HH:mm:ss");
+                        Colored($"[{timestamp}] ", ConsoleColor.DarkGray);
+                        Colored(name, ConsoleColor.Blue);
+                        Console.Write(" > ");
+                        Console.Write(_currentInput.ToString());
+                }
+
                 private async Task ReceiveMessages(NetworkStream stream)
                 {
                         byte[] buffer = new byte[2048];
@@ -167,19 +225,20 @@ namespace Client.Classes
                                                 var root = doc.RootElement;
                                                 if (root.TryGetProperty("type", out var type))
                                                 {
-                                                        HandleMessageByType(root, type.GetString());
+                                                        lock (_consoleLock)
+                                                        {
+                                                                // Chaque handler efface d'abord la ligne courante avant d'afficher
+                                                                HandleMessageByType(root, type.GetString());
+                                                                // on remet notre prompt de base
+                                                                PromptBasic(_lastName);
+                                                        }
                                                 }
                                         }
                                         catch (JsonException) { }
-                                        // Réaffiche le prompt avec le timestamp actuel
-                                        string timestamp = DateTime.Now.ToString("HH:mm:ss");
-                                        Console.Write($"{Colored($"[{timestamp}] ", ConsoleColor.DarkGray)}{Colored(_lastName, ConsoleColor.Blue)} > ");
                                 }
                         }
                 }
 
-
-                /// Aiguille le traitement des messages reçus en fonction de leur type (public, privé, erreur, etc.).
                 private void HandleMessageByType(JsonElement root, string? messageType)
                 {
                         switch (messageType)
@@ -205,11 +264,10 @@ namespace Client.Classes
                         }
                 }
 
-                /// Gestion des messages en mode public
                 private void HandlePublicMessage(JsonElement root)
                 {
+                        // On efface la ligne courante avant d'afficher le message
                         ClearCurrentLine();
-
 
                         string timestamp = root.TryGetProperty("timestamp", out var postime) ? postime.GetString() ?? "" : "";
                         if (!string.IsNullOrEmpty(timestamp))
@@ -218,8 +276,6 @@ namespace Client.Classes
                         Console.WriteLine(root.GetProperty("content").GetString());
                 }
 
-
-                /// Affiche un message privé reçu avec le nom de l'expéditeur
                 private void HandlePrivateMessage(JsonElement root)
                 {
                         ClearCurrentLine();
@@ -231,57 +287,55 @@ namespace Client.Classes
                         Colored(root.GetProperty("content").GetString() + "\n", ConsoleColor.Magenta);
                 }
 
-                /// Affiche pour l'expéditeur le message privé qu'il envoi (comme les /w de WoW ou autres jeux)
                 private void HandlePrivateConfirmation(JsonElement root)
                 {
                         ClearCurrentLine();
+
                         string timestamp = root.TryGetProperty("timestamp", out var postime) ? postime.GetString() ?? "" : "";
                         if (!string.IsNullOrEmpty(timestamp))
                                 Colored($"[{timestamp}] ", ConsoleColor.DarkGray);
-                        Colored($" à {root.GetProperty("recipient").GetString()} > {root.GetProperty("content").GetString()}\n", ConsoleColor.Magenta);
+                        Colored($"à {root.GetProperty("recipient").GetString()} > {root.GetProperty("content").GetString()}\n", ConsoleColor.Magenta);
                 }
 
-                //Affiche une liste des utilisateurs connectés
                 private void HandleUserList(JsonElement root)
                 {
                         ClearCurrentLine();
+
                         Colored("\n--------- Online ---------------\n", ConsoleColor.Cyan);
                         foreach (var user in root.GetProperty("users").EnumerateArray())
                                 Console.WriteLine($"- {user.GetString()}");
                         Colored("-----------------------------\n", ConsoleColor.Cyan);
                 }
 
-                //Gestion des messages d'erreur du serveur ici
                 private void HandleError(JsonElement root)
                 {
                         ClearCurrentLine();
+
                         Colored($"[ERREUR] {root.GetProperty("message").GetString()}\n", ConsoleColor.Red);
                 }
 
-                //liste des commandes disponibles venant du serveur
                 private void HandleHelp(JsonElement root)
                 {
                         ClearCurrentLine();
+
                         var commands = ExtractCommands(root);
                         DisplayCommandsTable(commands);
                 }
 
-                // On récupère les fameuses commandes depuis le JSON ici en créant une liste de dictionnaires
                 private List<Dictionary<string, string>> ExtractCommands(JsonElement root)
                 {
                         var commands = new List<Dictionary<string, string>>();
                         foreach (var cmd in root.GetProperty("commands").EnumerateArray())
                         {
                                 commands.Add(new Dictionary<string, string>
-                                {
-                                        { "Command", cmd.GetProperty("command").GetString() ?? "" },
-                                        { "Description", cmd.GetProperty("description").GetString() ?? "" }
-                                });
+                {
+                    { "Command", cmd.GetProperty("command").GetString() ?? "" },
+                    { "Description", cmd.GetProperty("description").GetString() ?? "" }
+                });
                         }
                         return commands;
                 }
 
-                //On affiche ici les commandes dans un truc pas mal (même si la bordure de droite se fait la malle)
                 private void DisplayCommandsTable(List<Dictionary<string, string>> commands)
                 {
                         Colored("╔══════════════════════════════════════════════════════════════════╗\n", ConsoleColor.Magenta);
@@ -289,26 +343,32 @@ namespace Client.Classes
                         Colored("╠══════════════════════════════════════════════════════════════════╣\n", ConsoleColor.Magenta);
                         foreach (var cmd in commands)
                         {
-                                Colored($"║ {cmd["Command"],-25} | {cmd["Description"],-30}         ║\n", ConsoleColor.Magenta);
+                                Colored($"║ {cmd["Command"],-25} | {cmd["Description"],-30}       ║\n", ConsoleColor.Magenta);
                         }
-                        Colored("╚══════════════════════════════════════════════════════════════════╝\n", ConsoleColor.Magenta);
+                        Colored("╚════════════════════════════════════════════════════════════════╝\n", ConsoleColor.Magenta);
                 }
 
-
-                //On efface la ligne actuelle de la console pour nettoyer l'affichage
                 private void ClearCurrentLine()
                 {
-                        // On efface la ligne et on replace le curseur au début
-                        Console.Write("\r" + new string(' ', Console.WindowWidth) + "\r");
+                        try
+                        {
+                                int width = Console.WindowWidth;
+                                // on efface la ligne courante
+                                Console.Write("\r" + new string(' ', Math.Max(0, width - 1)) + "\r");
+                        }
+                        catch
+                        {
+                                //si on a pas la largeur, on retourne juste au début de la ligne
+                                Console.Write("\r");
+                        }
                 }
 
-                // Méthode utilitaire pour afficher du texte en couleur dans la console
-                private string Colored(string text, ConsoleColor color)
+                // Colored pour donner des couleurs aux textes
+                private void Colored(string text, ConsoleColor color)
                 {
                         Console.ForegroundColor = color;
                         Console.Write(text);
                         Console.ResetColor();
-                        return "";
                 }
         }
 }

@@ -45,28 +45,57 @@ namespace Server.Classes
 
                 private async Task ManageClient(TcpClient client)
                 {
-                        using (client)
-                        using (NetworkStream stream = client.GetStream())
+                        try
+                        {
+                                using (NetworkStream stream = client.GetStream())
+                                {
+                                        // on tente d'authentifier le client / à l'avenir réduire les try etc...
+                                        var (username, userId) = await AuthenticationTry(stream);
+
+                                        // Une fois connecté, on peut soit ajouter le client aux collections
+                                        // et gérer les messages, soit gérer la déconnexion
+                                        AddClientToCollections(client, username);
+                                        await HandleClientMessages(stream, username, userId, client);
+                                        await CleanupClientDisconnection(userId, username);
+                                }
+                        }
+                        catch (Exception ex)
+                        {
+                                Console.WriteLine($"Erreur client: {ex.Message}");
+                        }
+                        finally
+                        {
+                                client.Close();
+                        }
+                }
+                private async Task<(string username, string userId)> AuthenticationTry(NetworkStream stream)
+                {
+                        bool authenticated = false;
+                        string? username = null;
+                        string? userId = null;
+
+                        // on lance une boucle d'authentification jusqu'à ce qu'une personne y arrive
+                        // à l'avenir, limiter nombre de tentatives et proposer reset via mail etc quand
+                        //on aura un système robuste d'authentification - compte :)
+                        while (!authenticated)
                         {
                                 // Authentification du client
                                 var authResult = await AuthenticateClient(stream);
-                                if (!authResult.success)
-                                        return;
-
-                                string username = authResult.username!;
-                                string userId = authResult.userId!;
-
-                                //  Ajout du client aux collections
-                                AddClientToCollections(client, username);
-
-                                //  Boucle de gestion des messages
-                                await HandleClientMessages(stream, username, userId, client);
-
-                                // Nettoyage à la déconnexion
-                                await CleanupClientDisconnection(userId, username);
+                                if (authResult.success)
+                                {
+                                        authenticated = true;
+                                        username = authResult.username;
+                                        userId = authResult.userId;
+                                }
+                                else
+                                {
+                                        // Continue la boucle pour une nouvelle tentative
+                                        continue;
+                                }
                         }
-                }
 
+                        return (username!, userId!);
+                }
                 private async Task<(bool success, string? username, string? userId)> AuthenticateClient(NetworkStream stream)
                 {
                         byte[] buffer = new byte[1024];
@@ -244,12 +273,11 @@ namespace Server.Classes
                         await stream.WriteAsync(data, 0, data.Length);
                 }
 
-                private string Colored(string text, ConsoleColor color)
+                private void Colored(string text, ConsoleColor color)
                 {
                         Console.ForegroundColor = color;
                         Console.Write(text);
                         Console.ResetColor();
-                        return text;
                 }
         }
 }
