@@ -15,7 +15,7 @@ namespace Server.Classes
                             {
                     new { command = "--help", description = "Affiche cette aide" },
                     new { command = "/msg <user> <message>", description = "Envoyer un message privé" },
-                    new { command = "list", description = "Lister les utilisateurs connectés" },
+                    new { command = "--list", description = "Lister les utilisateurs connectés" },
                     new { command = "exit", description = "Quitter le chat" }
                 }
                         };

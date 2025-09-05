@@ -1,9 +1,7 @@
-using System;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using System.Threading.Tasks;
 
 namespace Server.Classes
 {
@@ -127,13 +125,23 @@ namespace Server.Classes
                                 string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
 
                                 // Gestion du getid qu'on ne veut pas mettre a disposition des users
-                                if (message == "getid" && waitingForIdRequest)
+                                bool isGetIdRequest = false;
+                                try
+                                {
+                                        using var doc = JsonDocument.Parse(message);
+                                        var root = doc.RootElement;
+                                        if (root.TryGetProperty("type", out var typeProp) && typeProp.GetString() == "getid")
+                                                isGetIdRequest = true;
+                                }
+                                catch { }
+
+                                if (isGetIdRequest && waitingForIdRequest)
                                 {
                                         await SendResponse(stream, userId);
                                         waitingForIdRequest = false;
                                         continue;
                                 }
-                                else if (message == "getid")
+                                else if (isGetIdRequest)
                                 {
                                         continue;
                                 }
@@ -159,7 +167,7 @@ namespace Server.Classes
                                 Colored($"{username} s'est déconnecté.\n", ConsoleColor.Yellow);
                                 return true;
                         }
-                        if (message == "list")
+                        if (message == "--list")
                         {
                                 await _broadcast!.BroadcastUserList(client);
                                 return true;
@@ -181,9 +189,20 @@ namespace Server.Classes
                                 string privateMessage = parts[2];
                                 if (_usernameToClient.TryGetValue(recipient, out _))
                                 {
+                                        if (recipient == username)
+                                        {
+                                                return;
+                                        }
+
                                         await _broadcast!.BroadcastPrivate(userId, username, recipient, privateMessage);
                                         // Confirme l'envoi
-                                        var confirmation = new { type = "private_confirmation", recipient, content = privateMessage };
+                                        var confirmation = new
+                                        {
+                                                type = "private_confirmation",
+                                                recipient,
+                                                content = privateMessage,
+                                                timestamp = DateTime.Now.ToString("HH:mm:ss") // Ajoute le timestamp ici
+                                        };
                                         string confirmJson = JsonSerializer.Serialize(confirmation) + "\n";
                                         await stream.WriteAsync(Encoding.UTF8.GetBytes(confirmJson), 0, confirmJson.Length);
                                 }

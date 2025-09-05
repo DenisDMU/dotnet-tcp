@@ -1,7 +1,6 @@
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
-using System.Collections.Generic;
 
 namespace Server.Classes
 {
@@ -25,7 +24,7 @@ namespace Server.Classes
                                 type = "public_message",
                                 sender = senderName,
                                 content = message,
-                                timestamp = DateTime.UtcNow.ToString("o")
+                                timestamp = DateTime.Now.ToString("HH:mm:ss")
                         };
                         string json = JsonSerializer.Serialize(broadcastMsg) + "\n";
 
@@ -51,12 +50,17 @@ namespace Server.Classes
                         // Trouve le client destinataire dans le dictionnaire
                         if (_usernameToClient.TryGetValue(recipientName, out var recipientClient))
                         {
+                                if (recipientName == senderName)
+                                {
+
+                                        return;
+                                }
                                 var privateMsg = new
                                 {
                                         type = "private_message",
                                         sender = senderName,
                                         content = message,
-                                        timestamp = DateTime.UtcNow.ToString("o")
+                                        timestamp = DateTime.Now.ToString("HH:mm:ss")
                                 };
                                 string json = JsonSerializer.Serialize(privateMsg) + "\n";
 
@@ -67,12 +71,12 @@ namespace Server.Classes
                                 }
                                 catch (Exception ex)
                                 {
-                                        Console.WriteLine($"[DEBUG] Erreur lors de l'envoi du MP: {ex.Message}");
+                                        Console.WriteLine($"MP => Erreur lors de l'envoi du MP: {ex.Message}");
                                 }
                         }
                         else
                         {
-                                Console.WriteLine($"[DEBUG] Destinataire {recipientName} introuvable ou déconnecté");
+                                Console.WriteLine($"MP => Destinataire {recipientName} introuvable ou déconnecté");
                         }
                 }
 

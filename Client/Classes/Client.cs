@@ -102,7 +102,9 @@ namespace Client.Classes
                 private async Task RequestAndSetUserId(NetworkStream stream)
                 {
                         // Demande l'id au serveur
-                        byte[] askId = Encoding.UTF8.GetBytes("getid");
+                        var request = new { type = "getid" };
+                        string json = JsonSerializer.Serialize(request) + "\n";
+                        byte[] askId = Encoding.UTF8.GetBytes(json);
                         await stream.WriteAsync(askId, 0, askId.Length);
 
                         // Réception de l'ID
@@ -123,28 +125,25 @@ namespace Client.Classes
                 {
                         while (true)
                         {
-                                Console.Write($"{Colored(name, ConsoleColor.Blue)} > ");
+                                // On génère le timestamp actuel
+                                string timestamp = DateTime.Now.ToString("HH:mm:ss");
+                                // On affiche le prompt avec le timestamp
+                                Console.Write($"{Colored($"[{timestamp}] ", ConsoleColor.DarkGray)}{Colored(name, ConsoleColor.Blue)} > ");
                                 string? message = Console.ReadLine();
                                 if (string.IsNullOrEmpty(message))
-                                {
                                         continue;
-                                }
-                                ;
-
                                 if (message == "exit")
                                 {
                                         byte[] data = Encoding.UTF8.GetBytes(message);
                                         await stream.WriteAsync(data);
                                         break;
                                 }
-                                if (message == "list")
+                                if (message == "--list")
                                 {
                                         byte[] data = Encoding.UTF8.GetBytes(message);
                                         await stream.WriteAsync(data);
                                         continue;
                                 }
-
-
                                 byte[] msgData = Encoding.UTF8.GetBytes(message);
                                 await stream.WriteAsync(msgData);
                         }
@@ -166,18 +165,15 @@ namespace Client.Classes
                                         {
                                                 using var doc = JsonDocument.Parse(msg);
                                                 var root = doc.RootElement;
-
                                                 if (root.TryGetProperty("type", out var type))
                                                 {
                                                         HandleMessageByType(root, type.GetString());
                                                 }
                                         }
-                                        catch (JsonException)
-                                        {
-
-                                        }
-
-                                        Console.Write($"{Colored(_lastName, ConsoleColor.Blue)} > ");
+                                        catch (JsonException) { }
+                                        // Réaffiche le prompt avec le timestamp actuel
+                                        string timestamp = DateTime.Now.ToString("HH:mm:ss");
+                                        Console.Write($"{Colored($"[{timestamp}] ", ConsoleColor.DarkGray)}{Colored(_lastName, ConsoleColor.Blue)} > ");
                                 }
                         }
                 }
@@ -212,19 +208,26 @@ namespace Client.Classes
                 /// Gestion des messages en mode public
                 private void HandlePublicMessage(JsonElement root)
                 {
-                        if (root.GetProperty("sender").GetString() != _lastName)
-                        {
-                                ClearCurrentLine();
-                                Colored($"{root.GetProperty("sender").GetString()} > ", ConsoleColor.Blue);
-                                Console.WriteLine(root.GetProperty("content").GetString());
-                        }
+                        ClearCurrentLine();
+
+
+                        string timestamp = root.TryGetProperty("timestamp", out var postime) ? postime.GetString() ?? "" : "";
+                        if (!string.IsNullOrEmpty(timestamp))
+                                Colored($"[{timestamp}] ", ConsoleColor.DarkGray);
+                        Colored($"{root.GetProperty("sender").GetString()} > ", ConsoleColor.Blue);
+                        Console.WriteLine(root.GetProperty("content").GetString());
                 }
+
 
                 /// Affiche un message privé reçu avec le nom de l'expéditeur
                 private void HandlePrivateMessage(JsonElement root)
                 {
                         ClearCurrentLine();
-                        Colored($"[de {root.GetProperty("sender").GetString()}] > ", ConsoleColor.Magenta);
+
+                        string timestamp = root.TryGetProperty("timestamp", out var postime) ? postime.GetString() ?? "" : "";
+                        if (!string.IsNullOrEmpty(timestamp))
+                                Colored($"[{timestamp}] ", ConsoleColor.DarkGray);
+                        Colored($"de {root.GetProperty("sender").GetString()} > ", ConsoleColor.Magenta);
                         Colored(root.GetProperty("content").GetString() + "\n", ConsoleColor.Magenta);
                 }
 
@@ -232,7 +235,10 @@ namespace Client.Classes
                 private void HandlePrivateConfirmation(JsonElement root)
                 {
                         ClearCurrentLine();
-                        Colored($"[ à {root.GetProperty("recipient").GetString()}] {root.GetProperty("content").GetString()}\n", ConsoleColor.Magenta);
+                        string timestamp = root.TryGetProperty("timestamp", out var postime) ? postime.GetString() ?? "" : "";
+                        if (!string.IsNullOrEmpty(timestamp))
+                                Colored($"[{timestamp}] ", ConsoleColor.DarkGray);
+                        Colored($" à {root.GetProperty("recipient").GetString()} > {root.GetProperty("content").GetString()}\n", ConsoleColor.Magenta);
                 }
 
                 //Affiche une liste des utilisateurs connectés
