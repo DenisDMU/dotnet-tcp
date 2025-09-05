@@ -66,7 +66,7 @@ The application uses a JSON-based protocol for message exchange:
 
 ### Configuration
 
-1. Configure the MongoDB connection in your settings file:
+1. Configure the MongoDB connection in your settings file (rename database.exemple.json to database.json):
 
     ```json
     {
@@ -89,7 +89,7 @@ The application uses a JSON-based protocol for message exchange:
     dotnet run
     ```
 
-Connect to the server by providing the server IP and port (default: 127.0.0.1:5000).
+Connect to the server by providing the server IP and port (default: 127.0.0.1:5000) inside Program.cs in the Client directory.
 
 ## Usage
 
@@ -116,6 +116,5 @@ The application provides a simple authentication system:
 - **Error Handling:** Robust error handling for network issues and invalid inputs.
 - **Connection Management:** Graceful handling of client disconnections.
 - **Prompt Preservation:** Client UI maintains user input when receiving messages.
-
 
 ---
